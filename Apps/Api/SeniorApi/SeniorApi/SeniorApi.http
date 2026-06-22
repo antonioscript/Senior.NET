@@ -1,0 +1,6 @@
+@SeniorApi_HostAddress = http://localhost:5177
+
+GET {{SeniorApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
