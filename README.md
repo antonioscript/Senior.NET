@@ -11,19 +11,25 @@ e comparação (ex.: EF Core vs Dapper, Controllers vs Minimal APIs, etc.).
 ## Onde está o código
 
 ```
-docker-compose.yml      # Infra que não é NuGet package (SQL Server + Keycloak)
-infra/keycloak/          # Realm pré-configurado, importado automaticamente pelo Keycloak
+docker-compose.yml           # Infra local (SQL Server + Keycloak)
+infra/keycloak/              # Realm pré-configurado, importado automaticamente pelo Keycloak
 
-Apps/Api/SeniorApi/
-├── Domain/          # Entidades, value objects, regras de negócio. Zero dependências externas.
-├── Application/      # Casos de uso e abstrações (interfaces) que a infraestrutura implementa.
-├── Database/         # Infraestrutura de persistência - uma subpasta por tecnologia:
-│   ├── EntityFramework/   # ORM completo: DbContext, Fluent API, migrations
-│   ├── Dapper/            # Micro-ORM: SQL na mão, mapeamento manual
-│   ├── MongoDb/           # (ainda vazio - ver TODO)
-│   └── Redis/             # (ainda vazio - ver TODO)
-└── SeniorApi/         # Web API (ASP.NET Core) - composição/DI de tudo acima
-    └── Security/          # Validação de JWT do Keycloak + tradução de roles
+Apps/Api/
+├── SeniorApi/               # API 1 — Clean Architecture + Controllers
+│   ├── Domain/              #   Entidades, value objects, interfaces de repositório (IAggregateRoot)
+│   ├── Application/         #   IUnitOfWork, ILinqShowcaseRepository
+│   ├── Database/            #   Persistência: EF Core e Dapper lado a lado
+│   │   ├── EntityFramework/ #     DbContext, Fluent API, migrations, LINQ showcase
+│   │   ├── Dapper/          #     SQL manual, multi-mapping
+│   │   ├── MongoDb/         #     (vazio — ver TODO)
+│   │   └── Redis/           #     (vazio — ver TODO)
+│   └── SeniorApi/           #   Host: Controllers, Keycloak JWT, DI composition root
+│       └── Security/        #     JWT Bearer + role claims transformation
+│
+└── VerticalSliceApi/        # API 2 — Vertical Slice + Minimal APIs + MediatR
+    └── Features/            #   Uma pasta por feature, sem camadas horizontais
+        ├── Customers/       #     GetCustomers, GetCustomerById, CreateCustomer
+        └── Products/        #     GetProducts
 ```
 
 Cada classe de configuração (`Database/EntityFramework/AppDbContext.cs`,
@@ -89,7 +95,8 @@ Marcado o que já existe; o resto é o roadmap de tópicos "sênior" a explorar 
 - [ ] Modular Monolith vs Microsserviços - quando migrar e por quê
 
 ### API
-- [ ] Minimal APIs vs Controllers (trade-offs, quando usar cada um)
+- [x] Controllers (SeniorApi) — class-based, Clean Architecture, todos os tópicos anteriores
+- [x] Minimal APIs + Vertical Slice + MediatR (VerticalSliceApi) — feature folders, sem camadas, CQRS nativo
 - [ ] Versionamento de API (URL, header, media type)
 - [ ] `ProblemDetails` para erros padronizados (RFC 9457)
 - [ ] Rate limiting (`Microsoft.AspNetCore.RateLimiting`)
@@ -147,6 +154,17 @@ Mapa rápido de onde cada conceito vive no código. O objetivo é encontrar qual
 
 ---
 
+### [Arquitetura] Vertical Slice + Minimal APIs + MediatR (VerticalSliceApi)
+Cada feature é uma pasta auto-contida com Query/Command, Handler e Endpoint no mesmo arquivo.
+Sem camadas, sem repository interfaces. O Handler acessa o DbContext diretamente.
+- **Ponto de entrada:** `Apps/Api/VerticalSliceApi/Program.cs` — AddMediatR + AddEndpoints + MapEndpoints
+- **Auto-discovery de endpoints:** `Features/EndpointExtensions.cs` + `Features/IEndpoint.cs`
+- **Feature completa de exemplo:** `Features/Customers/GetCustomers.cs` — comentário no topo compara com SeniorApi
+- **Command (escrita) de exemplo:** `Features/Customers/CreateCustomer.cs` — SaveChangesAsync direto no handler
+- **Porta:** 5000 (HTTP) — rodar com `dotnet run --project Apps/Api/VerticalSliceApi`
+
+---
+
 ### [Arquitetura] Repository Pattern (Microsoft's approach)
 Interfaces de repositório vivem no `Domain` (por aggregate root), não na Application. Nenhum
 `IRepository<T>` genérico. O marker `IAggregateRoot` torna a regra visível em compile time.
@@ -200,6 +218,38 @@ emite tokens JWT assinados. A API **nunca vê senha** — só valida o JWT receb
 - **Registro no DI:** `SeniorApi/Program.cs:23` → `builder.Services.AddKeycloakAuthentication(builder.Configuration)`
 - **Config de dev:** `SeniorApi/appsettings.json` → seção `"Keycloak"` (Authority, Audience, RequireHttpsMetadata)
 - **Exemplo `[Authorize]` e `[Authorize(Roles = "admin")]`:** `SeniorApi/Controllers/MeController.cs:20` e `CustomersController.cs:34`
+
+---
+
+## Como rodar — VerticalSliceApi
+
+```bash
+# Pré-requisito: SQL Server rodando (docker compose up -d) e SeniorApi rodado ao menos uma vez
+# para aplicar as migrations (ou rode SeniorApi primeiro para criar o banco).
+
+dotnet run --project Apps/Api/VerticalSliceApi
+```
+
+Endpoints disponíveis (sem autenticação — foco no padrão arquitetural):
+```
+GET  http://localhost:5000/api/customers
+GET  http://localhost:5000/api/customers/{id}
+POST http://localhost:5000/api/customers     body: { "name": "Alice", "email": "alice@test.com" }
+GET  http://localhost:5000/api/products
+```
+
+Curls de teste:
+```bash
+curl http://localhost:5000/api/customers
+curl http://localhost:5000/api/products
+curl -X POST http://localhost:5000/api/customers \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","email":"test@example.com"}'
+```
+
+> **Nota:** ambas as APIs apontam para o mesmo banco (`SeniorApiDb`). Os dados criados no
+> VerticalSliceApi aparecem no SeniorApi e vice-versa. Isso é intencional — o ponto de comparação
+> é a arquitetura, não o dado.
 
 ---
 
