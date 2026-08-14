@@ -1,0 +1,52 @@
+services:
+
+  # SQL Server 2022 (Linux container) — relational database used by both EF Core and Dapper paths.
+  # The SA (System Administrator) account is the built-in SQL Server superuser; never use it in
+  # production (create a dedicated login with least-privilege instead).
+  #
+  # Password requirements: SQL Server enforces complexity (uppercase + lowercase + digit + symbol)
+  # even in dev mode — a weak password causes the container to silently exit on startup.
+  # ACCEPT_EULA is mandatory; without it the container refuses to start.
+  #
+  # Ports: "1433:1433" maps the container's SQL Server port to your localhost.
+  # Connection string (appsettings.json):
+  #   Server=localhost,1433;Database=SeniorApiDb;User Id=sa;Password=Senior@2026!;TrustServerCertificate=True;
+  # Note: SQL Server uses a comma between host and port, not a colon.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: senior-net-sqlserver
+    environment:
+      SA_PASSWORD: "Senior@2026!"
+      ACCEPT_EULA: "Y"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql   # persist data across container restarts
+
+  # Keycloak is a standalone Identity and Access Management server (Java app) - it is NOT a NuGet
+  # package, which is why it lives here as its own container instead of inside SeniorApi. It owns
+  # the login UI, the user database, and token issuance; SeniorApi never sees a password, it only
+  # validates the JWTs Keycloak hands out (see SeniorApi/Security/KeycloakAuthenticationExtensions.cs).
+  #
+  # `start-dev` is Keycloak's development mode: in-memory-ish storage (an embedded H2 database by
+  # default), relaxed HTTPS requirements, no production hardening. Never use start-dev in production
+  # - the real `start` command needs an external database and a real TLS certificate.
+  #
+  # `--import-realm` makes Keycloak read every *.json file under /opt/keycloak/data/import on
+  # startup and create that realm if it doesn't already exist yet. That is how infra/keycloak/realm-
+  # export.json (the "senior-net" realm, its "senior-api" client, roles, and two test users) ends up
+  # configured automatically - no manual clicking through the admin console required.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: senior-net-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/realm-export.json:/opt/keycloak/data/import/senior-net-realm.json:ro
+
+volumes:
+  sqlserver_data:   # named volume so SQL Server data survives `docker compose down` (not `down -v`)

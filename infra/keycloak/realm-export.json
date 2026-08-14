@@ -1,0 +1,68 @@
+{
+  "realm": "senior-net",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 600,
+  "roles": {
+    "realm": [
+      { "name": "admin", "description": "Full access to Senior.NET API" },
+      { "name": "customer", "description": "Regular customer access to Senior.NET API" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "senior-api",
+      "name": "Senior.NET API",
+      "enabled": true,
+      "protocol": "openid-connect",
+
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:5177/*", "https://localhost:7215/*"],
+      "webOrigins": ["+"],
+
+      "protocolMappers": [
+        {
+          "name": "senior-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "senior-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "alice@senior.net",
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "credentials": [
+        { "type": "password", "value": "alice123", "temporary": false }
+      ],
+      "realmRoles": ["admin"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "bob@senior.net",
+      "firstName": "Bob",
+      "lastName": "Customer",
+      "credentials": [
+        { "type": "password", "value": "bob123", "temporary": false }
+      ],
+      "realmRoles": ["customer"]
+    }
+  ]
+}
