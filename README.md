@@ -8,11 +8,63 @@ A ideia não é ter "a melhor arquitetura possível", e sim ter, no mesmo reposi
 forma de resolver o mesmo problema**, lado a lado, comentada, para servir de material de consulta
 e comparação (ex.: EF Core vs Dapper, Controllers vs Minimal APIs, etc.).
 
+## Projetos
+
+Este repositório não é uma única API monolítica que cresce indefinidamente. A ideia é ter
+**vários tipos de projeto .NET**, cada um com um propósito e um conjunto de padrões específico,
+espelhando o que existe em stacks reais de produção — desde APIs REST até workers, jobs e serviços
+de comunicação inter-processo.
+
+### Projetos existentes
+
+| Projeto | Tipo | Arquitetura | ORM / Acesso a dados | Padrões em foco |
+|---|---|---|---|---|
+| **SeniorApi** | Web API — Controllers | Clean Architecture / Onion | EF Core (padrão) ou Dapper (troca em uma linha) | Repository Pattern (Microsoft), Unit of Work, LINQ avançado, Keycloak JWT |
+| **VerticalSliceApi** | Web API — Minimal APIs | Vertical Slice | EF Core hoje; planejado migrar para Dapper direto no handler | CQRS com MediatR, IEndpoint auto-discovery, sem repository layer |
+
+**Por que dois tipos de API lado a lado?**
+Não é redundância — é contraste deliberado. Clean Architecture com Repository Pattern escala bem
+quando o domínio é complexo e você precisa isolar regras de negócio de infra. Vertical Slice
+escala bem quando o time cresce e você quer que cada feature seja completamente independente, sem
+que mexer num customer quebre um produto. O objetivo é que os dois vivam no mesmo repositório
+para servir de comparação prática e direta.
+
+O próximo passo natural no **VerticalSliceApi** é substituir o `AppDbContext` compartilhado por
+Dapper direto nos handlers — cada handler escreve seu próprio SQL, sem ORM intermediando. Isso
+tornaria o contraste com o SeniorApi ainda mais claro: uma API com change tracker e abstrações;
+outra com SQL explícito e zero camadas entre o handler e o banco.
+
+---
+
+### Roadmap de tipos de projeto
+
+A ideia de longo prazo é cobrir praticamente todos os tipos de projeto .NET que aparecem em
+ambientes de produção reais. Cada novo projeto segue o mesmo padrão: código comentado com o
+porquê das decisões, infra no `docker-compose.yml` se necessário, e entrada no TODO abaixo.
+
+| Projeto | Tipo | O que vai demonstrar |
+|---|---|---|
+| **WorkerService** | Worker / `IHostedService` | Background processing, `BackgroundService` com loop controlado, graceful shutdown, integração com filas |
+| **JobScheduler** | Background Jobs agendados | Hangfire ou Quartz.NET — cron jobs, retry automático, dashboard de execução, padrão Outbox como job periódico |
+| **GrpcService** | gRPC | Comunicação inter-serviço contrato-primeiro (`.proto`), streaming unário e server-side, quando preferir sobre REST |
+| **SignalRHub** | Real-time / WebSocket | Hub SignalR, grupos, reconexão automática, broadcasting — para notificações ao vivo |
+| **BFF** | Backend for Frontend | Agrega e adapta respostas de múltiplas APIs para um cliente específico (mobile vs web), evita over-fetching sem expor o domínio interno |
+| **EventDrivenWorker** | Event-Driven / Mensageria | MassTransit + RabbitMQ, publish/subscribe, consumers, Saga para fluxos distribuídos, Outbox/Inbox pattern |
+
+> Os nomes acima são provisórios — o que importa é o tipo de problema que cada projeto
+> resolve. A sequência não está definida: o próximo depende do que fizer mais sentido explorar
+> a partir do estado atual.
+
+---
+
 ## Onde está o código
 
 ```
-docker-compose.yml           # Infra local (SQL Server + Keycloak)
-infra/keycloak/              # Realm pré-configurado, importado automaticamente pelo Keycloak
+Senior.NET.slnx              # Solution — abre todos os projetos no Visual Studio / Rider
+docker-compose.yml           # Infra local: SQL Server + Keycloak (ver seção Docker abaixo)
+infra/
+└── keycloak/
+    └── realm-export.json    #   Realm importado automaticamente pelo Keycloak no startup
 
 Apps/Api/
 ├── SeniorApi/               # API 1 — Clean Architecture + Controllers
@@ -31,6 +83,49 @@ Apps/Api/
         ├── Customers/       #     GetCustomers, GetCustomerById, CreateCustomer
         └── Products/        #     GetProducts
 ```
+
+> **Abrindo no Visual Studio / Rider:** abra `Senior.NET.slnx` na raiz do repositório.
+> Todos os projetos aparecem organizados em duas pastas de solution: `SeniorApi` (Domain,
+> Application, Database, SeniorApi) e `VerticalSliceApi`. Novos projetos serão adicionados
+> à solution à medida que forem criados.
+
+---
+
+## Infraestrutura Docker
+
+Toda dependência externa roda via `docker-compose.yml` — nada precisa ser instalado na máquina
+fora do Docker Desktop.
+
+```bash
+docker compose up -d    # sobe tudo em background
+docker compose down     # para os containers (mantém os volumes)
+docker compose down -v  # para e apaga os volumes (dados do banco inclusive)
+```
+
+> **Nota (esta máquina):** o Docker Desktop não inicia automaticamente. Confirme que está
+> aberto (ícone na bandeja) antes de rodar `docker compose up -d`.
+
+### Serviços atuais
+
+| Serviço | Imagem | Porta | Credenciais | Para que |
+|---|---|---|---|---|
+| **SQL Server 2022** | `mcr.microsoft.com/mssql/server:2022-latest` | `1433` | `sa` / `Senior@2026!` | Banco relacional — usado por EF Core e Dapper |
+| **Keycloak 26** | `quay.io/keycloak/keycloak:26.0` | `8080` | admin: `admin`/`admin` | Identity server — emite JWTs validados pela SeniorApi |
+
+Strings de conexão para dev já configuradas em `appsettings.json` de cada API — nenhuma variável
+de ambiente precisa ser definida para rodar localmente.
+
+### Serviços planejados
+
+| Serviço | Imagem | Porta | Para que |
+|---|---|---|---|
+| **MongoDB 7** | `mongo:7` | `27017` | Persistência de documentos — tópico MongoDB |
+| **Redis 7** | `redis:7-alpine` | `6379` | Cache distribuído — tópico Redis / caching |
+| **RabbitMQ 3** | `rabbitmq:3-management-alpine` | `5672` / `15672` | Mensageria — tópico MassTransit |
+| **Jaeger** | `jaegertracing/all-in-one:latest` | `16686` | Tracing distribuído — tópico OpenTelemetry |
+| **Grafana** | `grafana/grafana:latest` | `3000` | Dashboards de observabilidade |
+
+Cada serviço será adicionado ao `docker-compose.yml` quando o tópico correspondente for implementado.
 
 Cada classe de configuração (`Database/EntityFramework/AppDbContext.cs`,
 `Database/Dapper/SqlConnectionFactory.cs`, e os arquivos em `Configurations/`) tem comentários
@@ -147,6 +242,14 @@ Marcado o que já existe; o resto é o roadmap de tópicos "sênior" a explorar 
 - [ ] CI/CD pipeline com GitHub Actions (build → testes → lint → deploy)
 - [ ] Feature flags
 
+### Tipos de projeto (ver seção Projetos acima)
+- [ ] Worker Service (`IHostedService` / `BackgroundService`)
+- [ ] Background Jobs agendados (Hangfire ou Quartz.NET)
+- [ ] gRPC Service (contrato `.proto`, streaming)
+- [ ] SignalR Hub (real-time, WebSocket)
+- [ ] BFF — Backend for Frontend (agregação, adaptação de resposta por cliente)
+- [ ] Event-Driven Worker (MassTransit + RabbitMQ, Saga, Outbox/Inbox)
+
 ## Referência de implementação
 
 Mapa rápido de onde cada conceito vive no código. O objetivo é encontrar qualquer coisa em menos de
@@ -256,10 +359,13 @@ curl -X POST http://localhost:5000/api/customers \
 ## Como rodar (fluxo completo)
 
 ```bash
-# 1. Sobe SQL Server + Keycloak (Docker Desktop precisa estar aberto)
+# 1. Abre a solution no Visual Studio / Rider
+#    Arquivo: Senior.NET.slnx (raiz do repositório)
+
+# 2. Sobe SQL Server + Keycloak (Docker Desktop precisa estar aberto)
 docker compose up -d
 
-# 2. Roda a API — migrations EF Core são aplicadas automaticamente no startup
+# 3. Roda a API — migrations EF Core são aplicadas automaticamente no startup
 dotnet run --project Apps/Api/SeniorApi/SeniorApi
 ```
 

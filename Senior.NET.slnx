@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/SeniorApi/">
+    <Project Path="Apps/Api/SeniorApi/Application/Application.csproj" />
+    <Project Path="Apps/Api/SeniorApi/Database/Database.csproj" />
+    <Project Path="Apps/Api/SeniorApi/Domain/Domain.csproj" />
+    <Project Path="Apps/Api/SeniorApi/SeniorApi/SeniorApi.csproj" />
+  </Folder>
+  <Folder Name="/VerticalSliceApi/">
+    <Project Path="Apps/Api/VerticalSliceApi/VerticalSliceApi.csproj" />
+  </Folder>
+</Solution>
